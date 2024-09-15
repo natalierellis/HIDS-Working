@@ -1,0 +1,116 @@
+---
+title: "Class 3 Project"
+format: 
+  html:
+    embed-resources: true
+---
+
+This file serves as a template for the Class 3 in-class project.
+
+```{r}
+#| warning: false
+library(tidyverse)     # loads the tidyverse tools
+library(RPostgres)     # loads the database driver for PostgreSQL
+library(connections)   # helps RPostgres work with RStudio
+library(keyring)       # access to a local encrypted keychain for passwords
+
+con <- connection_open(RPostgres::Postgres(),
+          dbname = "syntheticmguh",
+          host = "34.145.215.95",
+          user = "hids502_student",
+          password = key_get(service = "syntheticmguh", 
+                             username = "hids502_student"),
+          # Tell the driver to return very large integers as floating point (vs truncating them)
+          bigint = "numeric")
+        
+```
+
+# Question 1
+
+How many patients do we have in the database?
+
+```{sql connection=con}
+SELECT COUNT(*) AS patient_count
+FROM patients 
+```
+
+
+How many providers and payers are represented in the data set?
+
+```{sql connection=con}
+-- Your code goes here
+```
+
+
+# Question 2
+
+What is the mean amount spent per patient?
+
+What does this look like broken down by year?
+```{sql connection=con}
+-- Your code goes here
+SELECT EXTRACT(YEAR FROM start) as billing_year, 
+       sum(payer_coverage) as total_reimbursement
+FROM ENCOUNTERS
+GROUP BY billing_year
+ORDER BY billing_year DESC
+```
+
+
+# Question 3
+
+What is the mean amount spent for Medicare patients?
+
+
+What does this look like broken down by  year?
+```{sql connection=con}
+-- Your code goes here
+SELECT EXTRACT(YEAR FROM start) as billing_year, 
+       sum(payer_coverage)/count(DISTINCT patient) as total_reimbursement
+FROM ENCOUNTERS
+INNER JOIN payers on encounters.payer = payers.id
+WHERE payers.name = 'Medicare'
+GROUP BY billing_year
+ORDER BY billing_year DESC
+```
+
+# Question 4
+
+Using a common table expression, what are the min, max, and mean number of patients per provider?
+
+Using the raw data in R, plot this as a boxplot as well.
+
+Here's an example of a boxplot (note the additional use of the `y` axis that you probably don't need here.)
+
+```{sql connection=con, output.var="expenses_df"}
+-- Here we use `output.var` to assign the results of the query to a variable
+-- rather than printing!
+SELECT id, race, healthcare_expenses FROM patients
+```
+
+```{r}
+ggplot(expenses_df) + 
+  geom_boxplot(aes(x = healthcare_expenses, y = race))
+```
+
+# Question 5
+
+What is the min/max and mean number of encounters per patient in 2022? 
+
+Plot the distribution as a histogram – this will require you to use R
+
+Here's an example of a boxplot
+
+```{r}
+ggplot(expenses_df) + 
+  geom_histogram(aes(x = healthcare_expenses))
+```
+# Question 6 (Optional)
+
+What time frame does the database cover? In other words, when does the data start and when does it end?
+
+Show the volume of visits over time (as a table or a plot)
+
+```{sql connection=con}
+-- Your code goes here
+```

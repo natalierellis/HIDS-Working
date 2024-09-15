@@ -30,8 +30,7 @@ con <- connection_open(RPostgres::Postgres(),
 How many patients do we have in the database?
 
 ```{sql connection=con}
-SELECT COUNT(*) AS patient_count
-FROM patients 
+SELECT COUNT(*) AS patient_count FROM patients 
 ```
 
 
@@ -45,33 +44,27 @@ How many providers and payers are represented in the data set?
 # Question 2
 
 What is the mean amount spent per patient?
+```{sql connection=con}
+-- Your code goes here
+```
 
 What does this look like broken down by year?
 ```{sql connection=con}
 -- Your code goes here
-SELECT EXTRACT(YEAR FROM start) as billing_year, 
-       sum(payer_coverage) as total_reimbursement
-FROM ENCOUNTERS
-GROUP BY billing_year
-ORDER BY billing_year DESC
 ```
 
 
 # Question 3
 
 What is the mean amount spent for Medicare patients?
+```{sql connection=con}
+-- Your code goes here
+```
 
 
 What does this look like broken down by  year?
 ```{sql connection=con}
 -- Your code goes here
-SELECT EXTRACT(YEAR FROM start) as billing_year, 
-       sum(payer_coverage)/count(DISTINCT patient) as total_reimbursement
-FROM ENCOUNTERS
-INNER JOIN payers on encounters.payer = payers.id
-WHERE payers.name = 'Medicare'
-GROUP BY billing_year
-ORDER BY billing_year DESC
 ```
 
 # Question 4

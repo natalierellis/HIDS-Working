@@ -37,20 +37,26 @@ SELECT COUNT(*) AS patient_count FROM patients
 How many providers and payers are represented in the data set?
 
 ```{sql connection=con}
--- Your code goes here
+SELECT COUNT(*) AS providers_count FROM providers
 ```
-
+```{sql connection=con}
+SELECT COUNT(*) AS payers_count FROM payers
+```
 
 # Question 2
 
 What is the mean amount spent per patient?
 ```{sql connection=con}
--- Your code goes here
+SELECT AVG(total_claim_cost) FROM encounters;
 ```
 
 What does this look like broken down by year?
 ```{sql connection=con}
--- Your code goes here
+SELECT AVG(total_claim_cost),
+EXTRACT(YEAR from stop) as year
+FROM encounters
+GROUP BY year
+ORDER BY year DESC;
 ```
 
 
@@ -58,13 +64,25 @@ What does this look like broken down by year?
 
 What is the mean amount spent for Medicare patients?
 ```{sql connection=con}
--- Your code goes here
+SELECT AVG(total_claim_cost), payers.name
+FROM encounters
+INNER JOIN payers
+ON encounters.payer = payers.id
+WHERE name = 'Medicare'
+GROUP BY name;
 ```
 
 
 What does this look like broken down by  year?
 ```{sql connection=con}
--- Your code goes here
+SELECT AVG(total_claim_cost), payers.name,
+EXTRACT(YEAR from stop) as year
+FROM encounters
+INNER JOIN payers
+ON encounters.payer = payers.id
+WHERE name = 'Medicare'
+GROUP BY name, year;
+
 ```
 
 # Question 4
@@ -74,16 +92,63 @@ Using a common table expression, what are the min, max, and mean number of patie
 Using the raw data in R, plot this as a boxplot as well.
 
 Here's an example of a boxplot (note the additional use of the `y` axis that you probably don't need here.)
-
-```{sql connection=con, output.var="expenses_df"}
--- Here we use `output.var` to assign the results of the query to a variable
--- rather than printing!
-SELECT id, race, healthcare_expenses FROM patients
+```{sql connection=con, output.var = "patients_per_provider"}
+-- first generate CTE
+SELECT COUNT(DISTINCT(patient)) AS count_patients_per_provider, provider
+FROM encounters
+GROUP BY provider
 ```
 
 ```{r}
-ggplot(expenses_df) + 
-  geom_boxplot(aes(x = healthcare_expenses, y = race))
+ggplot(patients_per_provider) + 
+  geom_boxplot(aes(x = count_patients_per_provider, y = provider))
+```
+```{sql connection=con}
+-- then find mean number of patients per provider
+WITH patients_per_provider AS (
+SELECT COUNT(DISTINCT(patient)) AS count, provider
+FROM encounters
+GROUP BY provider
+)
+SELECT AVG(count) AS avg_patients_per_provider, provider
+FROM patients_per_provider
+GROUP BY provider
+```
+
+```{sql connection=con, output.var="expenses_df"}
+-- incorporate code into variable output 
+WITH patients_per_provider AS (
+SELECT COUNT(DISTINCT(patient)) AS count, provider
+FROM encounters
+GROUP BY provider
+)
+SELECT AVG(count) AS avg_patients_per_provider, provider
+FROM patients_per_provider
+GROUP BY provider
+```
+
+```{sql connection=con}
+-- incorporate code into variable output 
+WITH patients_per_provider AS (
+SELECT COUNT(DISTINCT(patient)) AS count, provider
+FROM encounters
+GROUP BY provider
+)
+SELECT MAX(count) AS max_patients_per_provider, provider
+FROM patients_per_provider
+GROUP BY provider
+```
+
+```{sql connection=con}
+-- incorporate code into variable output 
+WITH patients_per_provider AS (
+SELECT COUNT(DISTINCT(patient)) AS count, provider
+FROM encounters
+GROUP BY provider
+)
+SELECT MIN(count) AS min_patients_per_provider, provider
+FROM patients_per_provider
+GROUP BY provider
 ```
 
 # Question 5

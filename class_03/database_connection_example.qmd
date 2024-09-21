@@ -18,7 +18,7 @@ library(connections)   # helps RPostgres work with RStudio
 library(keyring)       # access to a local encrypted keychain for passwords
 
 # You will need to set your password once (enter the command below in the console):
-# keyring::key_set(service = "syntheticmguh", username = "hids502_student", prompt = "Password: ")
+# keyring::key_set(service = "syntheticmguh", username = "hids502_student", prompt = "Password:  pursuit-parson-trivial")
 
 # Note we use "connection_open" rather than "dbConnect", this is to ensure full integration
 # with RStudio in the database pane on the right using the `connections` package.

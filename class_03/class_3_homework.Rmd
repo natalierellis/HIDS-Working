@@ -1,0 +1,31 @@
+---
+title: "Class 3 Homework"
+output: html_document
+date: "2024-09-21"
+---
+```{r}
+#| warning: false
+library(tidyverse)     # loads the tidyverse tools
+library(RPostgres)     # loads the database driver for PostgreSQL
+library(connections)   # helps RPostgres work with RStudio
+library(keyring)       # access to a local encrypted keychain for passwords
+
+con <- connection_open(RPostgres::Postgres(),
+          dbname = "syntheticmguh",
+          host = "34.145.215.95",
+          user = "hids502_student",
+          password = key_get(service = "syntheticmguh", 
+                             username = "hids502_student"),
+          # Tell the driver to return very large integers as floating point (vs truncating them)
+          bigint = "numeric")
+        
+```
+
+# Question 1
+
+How many patients do we have in the database?
+
+```{sql connection=con}
+SELECT COUNT(*) AS patient_count FROM patients 
+```
+

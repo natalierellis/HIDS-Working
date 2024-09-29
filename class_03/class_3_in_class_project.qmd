@@ -33,12 +33,12 @@ How many patients do we have in the database?
 SELECT COUNT(*) AS patient_count FROM patients 
 ```
 
-
 How many providers and payers are represented in the data set?
 
 ```{sql connection=con}
 SELECT COUNT(*) AS providers_count FROM providers
 ```
+
 ```{sql connection=con}
 SELECT COUNT(*) AS payers_count FROM payers
 ```
@@ -46,11 +46,13 @@ SELECT COUNT(*) AS payers_count FROM payers
 # Question 2
 
 What is the mean amount spent per patient?
+
 ```{sql connection=con}
 SELECT AVG(total_claim_cost) FROM encounters;
 ```
 
 What does this look like broken down by year?
+
 ```{sql connection=con}
 SELECT AVG(total_claim_cost),
 EXTRACT(YEAR from stop) as year
@@ -59,10 +61,10 @@ GROUP BY year
 ORDER BY year DESC;
 ```
 
-
 # Question 3
 
 What is the mean amount spent for Medicare patients?
+
 ```{sql connection=con}
 SELECT AVG(total_claim_cost), payers.name
 FROM encounters
@@ -72,8 +74,8 @@ WHERE name = 'Medicare'
 GROUP BY name;
 ```
 
+What does this look like broken down by year?
 
-What does this look like broken down by  year?
 ```{sql connection=con}
 SELECT AVG(total_claim_cost), payers.name,
 EXTRACT(YEAR from stop) as year
@@ -92,6 +94,7 @@ Using a common table expression, what are the min, max, and mean number of patie
 Using the raw data in R, plot this as a boxplot as well.
 
 Here's an example of a boxplot (note the additional use of the `y` axis that you probably don't need here.)
+
 ```{sql connection=con, output.var = "patients_per_provider"}
 -- first generate CTE
 SELECT COUNT(DISTINCT(patient)) AS count_patients_per_provider, provider
@@ -103,6 +106,7 @@ GROUP BY provider
 ggplot(patients_per_provider) + 
   geom_boxplot(aes(x = count_patients_per_provider, y = provider))
 ```
+
 ```{sql connection=con}
 -- then find mean number of patients per provider
 WITH patients_per_provider AS (
@@ -153,7 +157,7 @@ GROUP BY provider
 
 # Question 5
 
-What is the min/max and mean number of encounters per patient in 2022? 
+What is the min/max and mean number of encounters per patient in 2022?
 
 Plot the distribution as a histogram – this will require you to use R
 
@@ -163,6 +167,7 @@ Here's an example of a boxplot
 ggplot(expenses_df) + 
   geom_histogram(aes(x = healthcare_expenses))
 ```
+
 # Question 6 (Optional)
 
 What time frame does the database cover? In other words, when does the data start and when does it end?

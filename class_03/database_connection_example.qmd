@@ -8,7 +8,7 @@ format:
 
 This is an example Quarto document that shows how to connect to the Synthetic MGUH database (a PostgreSQL database in the Google Cloud environment). Quarto is most commonly used to execute chunks of R or Python code sequentially, but can be used for many different kinds of code, including SQL. Here we will use it as a wrapper around SQL and RStudio as a basic interface to our database to query the database.
 
-After executing the first chunk, you should have be able to see "syntheticmguh" in the connections pane and use that to browse the tables and fields (look for the `public` schema). Note that we are using an additional package called `connections` to make sure that the database is browsable in the "Connections" pane in the top right of the RStudio interface. 
+After executing the first chunk, you should have be able to see "syntheticmguh" in the connections pane and use that to browse the tables and fields (look for the `public` schema). Note that we are using an additional package called `connections` to make sure that the database is browsable in the "Connections" pane in the top right of the RStudio interface.
 
 ```{r}
 #| warning: false
@@ -41,7 +41,7 @@ FROM patients
 GROUP BY gender
 ```
 
-# Querying and saving 
+# Querying and saving
 
 Sometimes you may want to take the results from your query and then pass them to plotting or other manipulations. You can do this with the `output.var` parameter. (Note that the date manipulations in the SQL below are PostgreSQL specific - we will review this in more detail in the course.)
 

@@ -25,7 +25,17 @@ con <- connection_open(RPostgres::Postgres(),
 
 # Question 1
 
-What are the top three causes of morbidity (illness)? This does not need to be a per patient query because a patient can have multiple illnesses. The following provides the 3 most prevalent illnesses in the dataset. They appear to all be related to respiratory infections.
+## Part 1
+
+What are the top three causes of morbidity (illness)? What are the top three causes of mortality?
+
+It appears that allergies, cold and flu, and "pink eye" are the three most common causes of illness in the US (1). The top three leading causes of death are heart disease, cancer, and accidents (2).
+
+## Part 2
+
+What are the top three causes of morbidity (illness)?
+
+This does not need to be a per patient query because a patient can have multiple illnesses. The following provides the 3 most prevalent illnesses in the dataset. They appear to all be related to respiratory infections.
 
 ```{sql connection=con}
 SELECT COUNT(*) AS condition_count, code, description
@@ -36,18 +46,30 @@ ORDER BY condition_count DESC
 LIMIT 3;
 ```
 
-We can include more than respiratory infections as well. It appears that upper respiratory infections, hypertension, and anemia are three of the top illnesses in the dataset.
+However, I also want to include the count of allergies. This will require a UNION ALL and a CTE so that allergy can be treated as a condition and counted appropriately.
 
 ```{sql connection=con}
-SELECT COUNT(*) AS condition_count, code, description
-FROM conditions
-WHERE description LIKE '%(disorder)%'
+WITH conditions_and_allergies AS (
+  SELECT c.code, c.description, c.patient
+  FROM conditions c
+  WHERE c.description LIKE '%(disorder)%'
+  UNION ALL
+  SELECT NULL AS code, 'allergy' AS description, a.patient
+  FROM allergies a
+)
+SELECT 
+    COUNT(*) AS condition_count, code, description
+FROM conditions_and_allergies
 GROUP BY code, description
 ORDER BY condition_count DESC
-LIMIT 10;
+LIMIT 5;
 ```
 
-What are the top three causes of mortality? It appears that they are end-stage renal disease, heart attack / heart failure, and COVID-19.
+It appears that viral sinusitis (common cold), allergies, and hypertension are the most common causes of illness in this dataset. I exclude acute viral pharyngitis and acute bronchitis because I think they are related to the common cold and flu.
+
+What are the top three causes of mortality?
+
+It appears that they are end-stage renal disease, heart attack / heart failure, and COVID-19.
 
 ```{sql connection=con}
 SELECT COUNT(*) AS death_count, encounters.reasondescription
@@ -61,7 +83,15 @@ ORDER BY death_count DESC
 
 # Question 2
 
-What is the breakdown of spending between Medicaid, Medicare, and everything else? I first produced a table representing the breakdown of spending among all payers.
+## Part 1
+
+What is the breakdown of spending between Medicaid, Medicare, and everything else?
+
+Of the national health expenditure, Medicaid accounts for 18%, Medicare accounts for 21%, and everything else accounts for 42% (3).
+
+## Part 2
+
+I first produced a table representing the breakdown of spending among all payers.
 
 ```{sql connection=con}
 SELECT SUM(total_claim_cost), payers.name
@@ -70,16 +100,140 @@ INNER JOIN payers
 ON encounters.payer = payers.id
 GROUP BY name;
 ```
-I then produced a table that represented the breakdown of spending among Medicare, Medicaid, and everything else. Everything else is the sum of the total cost for the payers besides Medicare and Medicaid. 
+
+I then produced a table that represented the breakdown of spending among Medicare, Medicaid, and everything else. Everything else is the sum of the total cost for payers besides Medicare and Medicaid. I also added a CTE so I could calculate the percent spending of each payer. I finally got it to work by adding a CROSS JOIN, so the percent_of_total_cost column was part of the output.
+
 ```{sql connection=con}
+WITH total_cost AS (
+SELECT SUM(total_claim_cost) AS total_cost
+FROM encounters
+)
 SELECT 
   SUM(encounters.total_claim_cost) AS total_cost,
   CASE WHEN payers.name = 'Medicare' THEN 'Medicare'
        WHEN payers.name = 'Medicaid' THEN 'Medicaid'
-       ELSE 'Everything else'END AS payer_group
+       WHEN payers.name = 'NO_INSURANCE' THEN 'No insurance'
+       ELSE 'Everything else'END AS payer_group,
+  (SUM(encounters.total_claim_cost) / total_cost.total_cost * 100) AS percent_of_total_cost
 FROM payers
 INNER JOIN encounters
 ON encounters.payer = payers.id
-GROUP BY payer_group
+CROSS JOIN total_cost
+GROUP BY payer_group, total_cost.total_cost
 ORDER BY total_cost DESC;
 ```
+
+It appears that about 28% of spending is Medicaid, about 17% of spending is Medicare, and about 50% is everything else, which excludes those who do not have insurance.
+
+# Question 3
+
+## Part 1
+
+What percent of Americans are estimated to be uninsured in the United States? How has this changed over the past 15 years, and why?
+
+I was able to find the estimated percents of non-elderly uninsured in the United States. In 2022, 9.6% were uninsured. In 2016, about 10% were uninsured. In 2013, 16.8% were uninsured. In 2010, 17.8% were uninsured. Overall, the percent of uninsured Americans has decreased (4).
+
+When the Affordable Care Act coverage expanded in 2014, this increased accessibility of health insurance for those with pre-existing health conditions; therefore, around this time, there was a significant drop in percent of Americans uninsured (5).
+
+## Part 2
+
+I will use the patient transitions table to determine percentage of uninsured now and over the past 15 years. First, I will create a CTE that determines whether the patient was insured or uninsured in each year.
+
+```{sql connection=con}
+SELECT patient,
+EXTRACT(YEAR FROM start_date) AS start_year,
+EXTRACT(YEAR FROM end_date) AS end_year,
+CASE WHEN payer = 'e03e23c9-4df1-3eb6-a62d-f70f02301496' THEN 'uninsured'
+       ELSE 'insured'END AS payer_status
+FROM payer_transitions
+```
+
+Then I will create another CTE from the previous CTE that generates a row for each patient for every year indicating their insurance status. I found a powerful function called generate_series that can do this.
+
+```{sql connection=con}
+WITH payer_status AS (SELECT patient,
+EXTRACT(YEAR FROM start_date) AS start_year,
+EXTRACT(YEAR FROM end_date) AS end_year,
+CASE WHEN payer = 'e03e23c9-4df1-3eb6-a62d-f70f02301496' THEN 'uninsured'
+       ELSE 'insured'END AS payer_status
+FROM payer_transitions
+)
+SELECT patient,
+payer_status, 
+generate_series(start_year, end_year) AS coverage_year
+FROM payer_status
+```
+
+I then selected from the yearly_payer_status CTE which I created above to determine the percentage of uninsured patients per year.
+
+```{sql connection=con}
+WITH payer_status AS (SELECT patient,
+  EXTRACT(YEAR FROM start_date) AS start_year,
+  EXTRACT(YEAR FROM end_date) AS end_year,
+CASE WHEN payer = 'e03e23c9-4df1-3eb6-a62d-f70f02301496' THEN 'uninsured'
+  ELSE 'insured'END AS payer_status
+FROM payer_transitions
+),
+yearly_payer_status AS (
+  SELECT patient,
+  payer_status, 
+  generate_series(start_year, end_year) AS coverage_year
+  FROM payer_status
+)
+SELECT 
+  coverage_year,
+  ROUND((COUNT(DISTINCT CASE WHEN payer_status = 'uninsured' THEN patient END) * 100.0 / COUNT(DISTINCT patient)), 2) AS percent_uninsured
+FROM yearly_payer_status
+GROUP BY coverage_year
+HAVING coverage_year >= 2009
+```
+
+It appears that in 2024, there are about 6.11% of patients without insurance. In our dataset, this percent has slightly decreased from 6.83% in 2009. Unfortunately, the dataset does not reflect the trends researched in part 1. It might be because this sample is biased. People without health insurance will avoid seeking healthcare, and this dataset only includes individuals who have sought healthcare. Therefore, the percent of uninsured per year aggregated here does not accurately reflect the American population.
+
+# Question 4
+
+## Part 1
+
+What is meant by "surprise billing" in the US? How common is this? What is the magnitude of surprise billing (eg, the range in prices billed)?
+
+A "surprise bill" is when a patient is billed for out-of-network care (6). It appears that 1 in 5 adults in the past two years have received a surprise bill and these bills can range from hundreds to thousands of dollars (7).
+
+## Part 2
+
+I first thought to perform a calculation to identify the patient's payment for the encounter. If the patient's payment was greater than 500, the payer did not cover the cost, and the patient did have a form of valid insurance, then I believe this would be evidence for surprise billing.
+
+```{sql connection=con}
+SELECT DISTINCT(encounters.id) AS encounter, patient, payer, total_claim_cost - payer_coverage AS payer_amount,
+CASE
+  WHEN (total_claim_cost - payer_coverage) > 500 AND payer_coverage = 0 THEN TRUE
+  ELSE FALSE
+  END AS evidence_for_surprise_billing
+FROM encounters
+WHERE payer NOT LIKE 'e03e23c9-4df1-3eb6-a62d-f70f02301496';
+```
+
+After consulting with Subha, I then modified my query to account for encounters when the payer billed (out-of-network) was not the actual payer for the patient and when the payer did not cover the encounter. This information involved pulling from the payer_transitions table. Therefore, evidence for surprise billing was defined as cases where the out-of-network payer did not cover the encounter, the payer in the encounters table did not match with the payer in the payer_transitions table at that time for the encounter, and the patient had to pay more than 500 dollars for the bill. There are encounters that satisfy this criteria; therefore, there is evidence for surprise billing in the dataset.
+
+```{sql connection=con}
+SELECT DISTINCT(e.id) AS encounter, e.patient
+FROM 
+    encounters e
+INNER JOIN 
+    payer_transitions pt 
+    ON e.patient = pt.patient
+    AND e.stop BETWEEN pt.start_date AND pt.end_date
+WHERE
+    (total_claim_cost - payer_coverage) > 500 
+    AND payer_coverage = 0 
+    AND e.payer != pt.payer;
+```
+
+# References
+
+1.  The Trustees of Princeton University. (n.d.). Common illnesses \| University Health Services. Princeton University. https://uhs.princeton.edu/health-resources/common-illnesses
+2.  Centers for Disease Control and Prevention. (2024, May 2). FASTSTATS - leading causes of death. Centers for Disease Control and Prevention. https://www.cdc.gov/nchs/fastats/leading-causes-of-death.htm
+3.  NHE Fact Sheet. CMS.gov. (2024, September 10). https://www.cms.gov/data-research/statistics-trends-and-reports/national-health-expenditure-data/nhe-fact-sheet#:\~:text=Medicare%20spending%20grew%205.9%25%20to,29%20percent%20of%20total%20NHE.
+4.  Health insurance coverage of the total population. KFF. (2023, October 27). https://www.kff.org/other/state-indicator/total-population/?activeTab=graph&currentTimeframe=0&startTimeframe=13&sortModel=%7B%22colId%22%3A%22Location%22%2C%22sort%22%3A%22asc%22%7D
+5.  Entering their second decade, Affordable Care Act coverage expansions ... Center on Budget and Policy Priorities. (n.d.). https://www.cbpp.org/research/health/entering-their-second-decade-affordable-care-act-coverage-expansions-have-helped
+6.  Surprise Medical Bills: Frequently Asked Questions. National Patient Advocate Foundation. (n.d.). https://education.patientadvocate.org/wp-content/uploads/2022/07/How-to-Save-Money-on-Medical-Bills-1.pdf
+7.  Pollitz K, Lopes L, Kearney A, et al. US Statistics on Surprise Medical Billing. JAMA.2020;323(6):498. doi:10.1001/jama.2020.0065

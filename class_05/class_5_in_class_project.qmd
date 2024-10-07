@@ -27,16 +27,20 @@ con <- connection_open(RPostgres::Postgres(),
 
 How many encounters for COVID? Here we are going to use a fuzzy match using SQL, ie the "%" sign and the LIKE
 ```{sql connection=con}
--- Your code goes here
-SELECT reasondescription,
-  COUNT(id) AS encounters, 
-  COUNT(DISTINCT patient) as patients
+-- results, observations
+SELECT patient, description, code, start, stop
 FROM encounters
 WHERE reasondescription like '%COVID%'
-GROUP BY reasondescription
+
 ```
 
+```{sql connection=con}
+-- results, observations
+SELECT DISTINCT
+FROM encounters
+WHERE reasondescription like '%COVID%'
 
+```
 Why kind of encounters are these?
 
 ```{sql connection=con}
@@ -48,17 +52,27 @@ GROUP BY encounterclass, description
 
 Where what about lab tests? These show in the `observations` tables. How may tests did we have, what proportion were positive? You will want to start by looking at the table structure, then figuring out how you might be able to find a value. Remember, these disease is COVID-19, but the virus is SARS-CoV-2!
 
+So both suspected covid and covid for one LOINC code. 
+
 ```{sql connection=con}
-SELECT *
-  from observations 
-  LIMIT 10
+SELECT DISTINCT encounters.patient, encounters.reasondescription, observations.value
+FROM encounters
+JOIN observations
+ON observations.encounter = encounters.id
+WHERE observations.description LIKE '%SARS-CoV-2%'
+  AND observations.value IS NULL
+  AND encounters.reasondescription = 'Suspected COVID-19';
+
 ```
 How about people who are recorded as having COVID as a problem/condition? What kinds of problem/conditions do we have? How many patients were suspected to have COVID in 2020?
 
 ```{sql connection=con}
-SELECT *
-  from conditions 
-  LIMIT 10
+SELECT COUNT(DISTINCT(encounters.patient)), reasondescription
+FROM encounters
+INNER JOIN observations
+ON observations.encounter = encounters.id
+WHERE observations.description like '%SARS-CoV-2%'
+GROUP BY reasondescription
 ```
 
 ## Creating A COVID Registry

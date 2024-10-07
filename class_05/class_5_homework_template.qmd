@@ -1,12 +1,15 @@
 ---
-title: "Class 5 Homework Template"
 format: 
   html:
+    toc: true
+    toc-depth: 3
     self-contained: true
+    page-breaks: true
 ---
-let's see if this works 
+
 ```{r}
-#| warning: false
+#| echo: false
+#| include: false
 library(tidyverse)     # loads the tidyverse tools
 library(RPostgres)     # loads the database driver for PostgreSQL
 library(connections)   # helps RPostgres work with RStudio
@@ -22,39 +25,252 @@ con <- connection_open(RPostgres::Postgres(),
           bigint = "numeric")
 ```
 
-# Multi-stakeholder COVID Registry
+# Proposal for a Multi-Stakeholder COVID Patient Registry
 
-3 DC Hospitals, MGUH, Sibley and GW want to collaborate and share data on all their COVID patients to learn about how to improve clinical care.
-Each hospital uses a different EMR, with different data models and tools.
-For your proposal, assume that your team will coordinate the process and host the data. 
+This proposal outlines the creation of a multi-stakeholder registry of COVID patients across three major hospitals in Washington, DC: MedStar Georgetown University Hospital (MGUH), Sibley Memorial Hospital, and George Washington University Hospital (GW). The goal is to create a collaborative data-sharing database to improve patient care for COVID-19 patients by collecting and analyzing COVID-19 data across the three participating hospitals. The registry will be hosted by our hospital, and we are responsible for the data management and standardization given that each hospital uses different Electronic Medical Record (EMR) systems.
 
-## Cohort
+## Objectives
 
-What patients will be included, with specific logic to select them.
+1.  Identify patients to be included in registry
+2.  Identify additional features to be included in registry
+3.  Ensure interoperability of data through data standardization
+4.  Specify relevant outcomes to track
 
+### Patient Selection Criteria
 
-```{sql connection=con}
-```
+The registry will include all patients who have been diagnosed with COVID-19, tested positive for SARS-CoV-2, or are suspected of having COVID-19. This comprehensive approach is essential for capturing the full spectrum of COVID-19 patients, given that the test is dependent on timing, variation in symptoms, and ease of viral spread.
 
-What data in addition to patient IDs will you include, and why?
-Obviously you will want when they were diagnosed and age/gender, but what other data points? Where are they located? Specify table and how you will extract them.
+1.  Confirmed COVID-19 Case: Patients who have a confirmed positive SARS-CoV-2 test will be included in the registry. These patients are identified using their test result in the observations table.
+2.  Suspected COVID-19 Cases: Patients suspected of having COVID-19 are described as so in the encounters table. These patients may not have a positive SARS-CoV-2 test result.
 
-```{sql connection=con}
-```
+-   Testing Accuracy and Timing: COVID-19 tests are more accurate when a patient reached a sufficient viral load; therefore, suspected cases includes those who initially test negative but are still suspected of having the disease for other reasons, as determined by the physician.
+-   Symptom Variation: COVID-19 symptoms are quite diverse, and many patients are asymptomatic. Including suspected cases allows us to capture patients who exhibit uncommon clinical signs of COVID-19 but might not have a confirmed test.
+-   Ease of Spread: COVID-19 spreads rapidly and asymptomatically, meaning that patients suspected of having the virus given an exposure should be teated with similar caution to those who test positive. Including these patients ensures that the registry captures individuals who might develop or had already recovered from the virus, aiding in epidemiological surveillance.
 
-## Data Integration
-
-How will you assure that data from all 3 hospitals can be analyzed as a single data set?
-Be specific, use examples from "our" data.
-
-```{sql connection=con}
-```
-
-
-## Outcomes
-
-What outcomes will you track, and why? Specify which data (table etc) will be needed to support tracking these outcomes.
+Below is the SQL code to generate a registry of COVID-19 patients given our definition:
 
 ```{sql connection=con}
+WITH if_covid AS (
+    -- Select from encounters
+    SELECT DISTINCT patient, 
+    reasondescription AS description, 
+    NULL AS value
+    FROM encounters 
+    WHERE reasondescription like '%COVID-19%'
+    -- includes those diagnosed with COVID-19 and those suspected of having it
+    
+    UNION
+    
+    -- Select from observations
+    SELECT patient, 
+    description, 
+    value
+    FROM observations
+    WHERE description LIKE '%SARS-CoV-2%'
+    AND value = 'Detected (qualifier value)'
+    -- also includes those who tested positive for COVID-19 from observations but did not meet above criteria 
+)
+-- Main query to return patient
+SELECT patient
+FROM if_covid;
+
 ```
 
+### Additional Feature Selection
+
+In addition to patient ID, additional data points will be included to ensure that subsequent analysis is comprehensive:
+
+-   Age: The age of the patient at time of diagnosis
+-   Gender: Demographic variable necessary for understanding gender disparities
+-   Race: Demographic variable necessary for understanding racial disparities.
+-   Age: The age of the patient at time of diagnosis
+-   Clinical Diagnoses: Track current and past conditions to further understand comorbidities.
+-   Organization: The hospital where the patient was diagnosed is important for understanding organization-specific insights.
+-   Outcomes: Outcomes such as mortality or length of stay are important for tracking significant COVID-19 cases.
+
+Data will need to be pulled from the encounters, patients, organizations, conditions, and observations tables. The below SQL query is based upon the registry above but has been greatly expanded upon to include the relevant data points.
+
+```{sql connection=con}
+--My union statement was not removing duplicates for some reason, and so I kept getting duplicates. However, even when I tried to remove the duplicates, the query instead removed the instances when the patient was diagnosed more than once. I have tried to troubleshoot, but I could not figure it out. 
+
+WITH if_covid AS (
+    -- Select from encounters
+    SELECT DISTINCT 
+        patient, 
+        reasondescription AS description, 
+        NULL AS value, -- not in table
+        start AS diagnosis_date, -- use whichever comes first
+        organization AS organization_id,
+        (encounters.stop - encounters.start) AS length_of_stay
+    FROM encounters 
+    WHERE reasondescription LIKE '%COVID-19%'
+    
+    UNION --was originally getting duplicates even with UNION present
+    
+    -- Select from observations
+    SELECT 
+        patient, 
+        description, 
+        value,
+        date AS diagnosis_date, -- use whichever comes first
+        NULL AS organization_id, -- not in table
+        NULL AS length_of_stay -- not in table
+    FROM observations
+    WHERE description LIKE '%SARS-CoV-2%'
+    AND value = 'Detected (qualifier value)'
+), -- below CTE added to remove duplicates, based on if_covid CTE
+patient_ranked AS (
+    SELECT 
+        if_covid.patient,
+        if_covid.diagnosis_date,
+        if_covid.organization_id,
+        if_covid.length_of_stay,
+        ROW_NUMBER() OVER (PARTITION BY if_covid.patient ORDER BY if_covid.diagnosis_date) AS row_num -- Rank each patient by their diagnosis date
+    FROM if_covid
+)
+
+-- Main query to return patient details and additional information
+SELECT 
+    patient_ranked.patient,
+    patient_ranked.diagnosis_date,
+    patients.race,
+    patients.gender,
+    EXTRACT(YEAR FROM AGE(patient_ranked.diagnosis_date, patients.birthdate)) AS age_at_diagnosis, -- Calculate patient's age at diagnosis
+    organizations.name AS organization_name, -- Name of the organization from organization table
+    patient_ranked.length_of_stay, -- Length of stay calculated from encounters
+    CASE WHEN observations.code = '69453-9' THEN 'Yes' ELSE 'No' END AS died, -- Check if patient died using the observation code
+    STRING_AGG(DISTINCT conditions.description, ', ') AS past_conditions -- Concatenate past conditions into one value so no multiple rows
+FROM patient_ranked
+LEFT JOIN patients --need to join on all tables that we are pulling data from
+    ON patient_ranked.patient = patients.id
+LEFT JOIN organizations 
+    ON patient_ranked.organization_id = organizations.id
+LEFT JOIN conditions 
+    ON patient_ranked.patient = conditions.patient
+LEFT JOIN observations
+    ON patient_ranked.patient = observations.patient
+    AND observations.code = '69453-9' -- Check for mortality status
+WHERE MOD(patient_ranked.row_num, 2) = 1  -- Tried to select every other row number so duplicates for same encounter were not included but multiple encounters where patient was diagnosed were included...
+GROUP BY --everything selected for needs to be included here
+    patient_ranked.patient, 
+    patient_ranked.diagnosis_date, 
+    patients.race, 
+    patients.gender, 
+    patients.birthdate, 
+    organizations.name, 
+    patient_ranked.length_of_stay,
+    observations.code
+ORDER BY patient_ranked.patient
+LIMIT 1;
+
+
+```
+
+### Data Standardization and Integration
+
+Each hospital uses a different EMR system with unique data models. To ensure that the data from all three hospitals can be integrated and analyzed as a single dataset, we will perform the following steps:
+
+1.  Unified Data Schema: Because each hospital uses a different data model, we will first create a standardized schema and common data dictionary that can systematically integrate relevant data from each hospital's data model. For example, patient birthdate (or maybe dob in another hospital's EMR) will be included in the patient table and diagnosis date will be included in the encounters table.
+2.  Data Normalization: We will convert patient information, diagnosis codes, and all other relevant data to a common format. For example, if one hospital sends the age at diagnosis and another sends the birthdate of the patient, we will convert the data point to the most useful format (age at diagnosis). In this example, we would subtract the birthdate from the diagnosis date to determine the age at diagnosis, which we show below. Therefore, every patient will have the age at diagnosis calculated. Then, we can perform an aggregate function across all patients at the three hospitals to calculate the average age of the patient at diagnosis. In addition, diagnosis terminology will be standardized using SNOWMED CT for diagnostic codes and LOINC for lab results.
+3.  Unique Patient ID: A unique patient ID will be implemented across all hospitals to avoid duplicates. Patients with more than one ID will be determined based on birthdate and name, and their information can be concatenated under one unique identifier for the patient.
+
+Below is an example SQL query to calculate the average age at diagnosis across all hospitals:
+
+```{sql connection=con}
+WITH if_covid AS (
+    -- Select from encounters
+    SELECT DISTINCT 
+        patient, 
+        reasondescription AS description, 
+        NULL AS value,
+        encounters.start AS diagnosis_date
+    FROM encounters 
+    WHERE reasondescription LIKE '%COVID-19%'
+    -- includes those diagnosed with COVID-19 and those suspected of having it
+    
+    UNION
+    
+    -- Select from observations
+    SELECT 
+        patient, 
+        description, 
+        value,
+        observations.date AS diagnosis_date
+    FROM observations
+    WHERE description LIKE '%SARS-CoV-2%'
+    AND value = 'Detected (qualifier value)'
+    -- includes those who tested positive for COVID-19 from observations but did not meet above criteria 
+)
+
+-- Main query to calculate the average age at diagnosis
+SELECT 
+    AVG(EXTRACT(YEAR FROM AGE(if_covid.diagnosis_date, patients.birthdate))) AS avg_age_at_diagnosis
+FROM if_covid
+INNER JOIN patients 
+    ON if_covid.patient = patients.id;
+-- Calculates the average age at diagnosis
+
+```
+
+### Outcomes to Track
+
+There are many possible outcomes to track, and we will provide an example query of one outcome, demographic breakdown.
+
+1.  Demographic Breakdown: What is the demographic breakdown of COVID-19 diagnosis? With this information we can identify vulnerable populations, motivating research and public health interventions for specific demographic groups.
+2.  Recovery Status: Did the patient recover or die? This will identify severe COVID-19 cases, which can prompt further investigation into the possible factors that resulted in the patient's death. This outcome was calculated above and required searching for a specific code within the observations table.
+3.  Average Length of Stay: Quantifying the average length of hospital stay is essential for understanding hospital resource allocation, which can inform hospital preparedness efforts. This outcome was calculated above and required subtracting the encounters.start date from the encounters.stop date.
+4.  Number of Patient Diagnosed per Day: Across the three hospitals, how many patients were diagnosed with COVID-19 per day? This requires diagnosis date, which can be extracted from the observations (date) or encounters tables (start or stop). A more meaningful outcome would be to sum the patients diagnosed per day for a certain period of time and visualize this with a scatterplot. This information will help the hospitals understand, predict, and prepare for COVID-19 outbreaks in the area.
+
+All of these outcomes can be further stratified based on hospital to determine hospital-specific insights and trends.
+
+```{sql connection=con}
+WITH if_covid AS (
+    -- Select from encounters
+    SELECT DISTINCT 
+        patient, 
+        reasondescription AS description, 
+        NULL AS value,
+        encounters.start AS diagnosis_date
+    FROM encounters 
+    WHERE reasondescription LIKE '%COVID-19%'
+    -- includes those diagnosed with COVID-19 and those suspected of having it
+    
+    UNION
+    
+    -- Select from observations
+    SELECT 
+        patient, 
+        description, 
+        value,
+        observations.date AS diagnosis_date
+    FROM observations
+    WHERE description LIKE '%SARS-CoV-2%'
+    AND value = 'Detected (qualifier value)'
+    -- also includes those who tested positive for COVID-19 from observations but did not meet above criteria 
+)
+
+-- Main query to return total patients and percentages
+SELECT 
+    COUNT(DISTINCT if_covid.patient) AS total_patients, -- Total number of unique patients
+    
+    -- Percent that were male
+    100.0 * COUNT(DISTINCT CASE WHEN patients.gender = 'M' THEN if_covid.patient END) / COUNT(DISTINCT if_covid.patient) AS percent_male,
+    
+    -- Percent that were female
+    100.0 * COUNT(DISTINCT CASE WHEN patients.gender = 'F' THEN if_covid.patient END) / COUNT(DISTINCT if_covid.patient) AS percent_female,
+    
+    -- Percent that were White
+    100.0 * COUNT(DISTINCT CASE WHEN patients.race = 'white' THEN if_covid.patient END) / COUNT(DISTINCT if_covid.patient) AS percent_white,
+    
+    -- Percent that were Black
+    100.0 * COUNT(DISTINCT CASE WHEN patients.race = 'black' THEN if_covid.patient END) / COUNT(DISTINCT if_covid.patient) AS percent_black,
+    
+    -- Percent that were Asian
+    100.0 * COUNT(DISTINCT CASE WHEN patients.race = 'asian' THEN if_covid.patient END) / COUNT(DISTINCT if_covid.patient) AS percent_asian
+
+FROM if_covid
+LEFT JOIN patients 
+    ON if_covid.patient = patients.id;
+
+
+```

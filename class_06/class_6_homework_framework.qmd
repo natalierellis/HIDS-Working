@@ -13,12 +13,11 @@ library(connections)   # helps RPostgres work with RStudio
 library(keyring)       # access to a local encrypted keychain for passwords
 
 con <- connection_open(RPostgres::Postgres(),
-          dbname = "syntheticMGUH",
-          host = "34.85.177.140",
+          dbname = "syntheticmguh",
+          host = "34.145.215.95",
           user = "hids502_student",
           password = key_get(service = "syntheticmguh", 
-                             username = "hids502_student"),
-          bigint = "numeric")
+                             username = "hids502_student"))
 ```
 
 # SyntheticMGUH Asthma Care Quality Report

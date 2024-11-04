@@ -124,7 +124,7 @@ WITH Smokers AS (
       AND date < '2020-09-24'
       ORDER BY patient, date DESC
     )
-    -- This is a common but advanced technique.
+    -- This is a common technique which we haven't discussed in class
     SELECT count(*) total_patients, sum(smoker) AS total_smokers,
     sum(smoker) * 1.0 / count(*) * 100 AS smoking_rate_percent
     FROM AsthmaCohort

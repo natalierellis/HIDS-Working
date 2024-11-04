@@ -1,0 +1,104 @@
+---
+title: "Class 6 Homework Template"
+format: 
+  html:
+    self-contained: true
+---
+
+```{r setup, include=FALSE}
+#| warning: false
+library(tidyverse)     # loads the tidyverse tools
+library(RPostgres)     # loads the database driver for PostgreSQL
+library(connections)   # helps RPostgres work with RStudio
+library(keyring)       # access to a local encrypted keychain for passwords
+
+con <- connection_open(RPostgres::Postgres(),
+          dbname = "syntheticmguh",
+          host = "34.145.215.95",
+          user = "hids502_student",
+          password = key_get(service = "syntheticmguh", 
+                             username = "hids502_student"))
+```
+
+# SyntheticMGUH Asthma Care Quality Report
+
+This report should be formatted as something you would return to a stakeholder in a healthcare organizations. It should be correctly (but simply) formatted, there should not be any left over text etc. 
+
+For the basics of Markdown, try this short guide:
+https://www.markdownguide.org/basic-syntax/
+
+In particular pay attention to the use of Headers and the `#` - don't put regular text in a header, and don't forget the space after the `#`. Note that line breaks to create paragraphs require two carriage returns.
+
+You will want to start by defining your cohort - as a reminder, here is an example for last weeks homework. 
+
+```{sql connection=con}
+WITH COVID_cohort AS (
+  -- Note that when you use UNION it enforces as DISTINCT on the results
+  -- so we should get one row per patient ID, even with multiple encounters etc
+  SELECT patient 
+    FROM encounters WHERE code = '1505002' -- COVID-19
+  UNION
+  SELECT patient 
+    FROM conditions WHERE code = '840539006' -- COVID-19
+  UNION
+  SELECT patient 
+    FROM observations WHERE code = '94531-1' -- these are text codes, maps to SARS-CoV-2 RNA Pnl Resp NAA+probe
+    AND value like 'Detected%'
+)
+SELECT COUNT(*) as rows, COUNT(DISTINCT patient) as patients -- checking to see that you have one patient per row is good practice!
+FROM COVID_cohort
+```
+
+Once you are confident in your cohort definition it may be easier to create a temporary table. Here's an example:
+
+```{sql connection=con}
+-- First, if our table already exists we will drop it.
+DROP TABLE IF EXISTS COVIDCohort
+```
+```{sql connection=con}
+WITH cohort_patients AS (
+  -- Note that when you use UNION it enforces as DISTINCT on the results
+  -- so we should get one row per patient ID, even with multiple encounters etc
+  SELECT patient 
+    FROM encounters WHERE code = '1505002' -- COVID-19
+  UNION
+  SELECT patient 
+    FROM conditions WHERE code = '840539006' -- COVID-19
+  UNION
+  SELECT patient 
+    FROM observations WHERE code = '94531-1' -- these are text codes, maps to SARS-CoV-2 RNA Pnl Resp NAA+probe
+    AND value like 'Detected%'
+)
+-- This command takes our cohort data from above, creates a table and stores it in that temporary table. 
+-- When we disconnect the TEMP table will be deleted.
+SELECT * INTO TEMP COVIDCohort FROM cohort_patients
+```
+
+Now we can use that temp table directly:
+
+```{sql connection=con}
+SELECT * FROM COVIDCohort LIMIT 5
+
+```
+
+Since past years the list of medications has gotten a lot more complex - I've pulled them for you here:
+
+```{sql connection=con}
+WITH asthma_meds AS (
+  SELECT 'maintenance' as type, code, description, COUNT(distinct patient) patients
+  FROM medications
+  WHERE
+      -- Maintenance inhalers
+      code in (95996, 349094, 616830, 1998774, 896209, 896006, 966529, 746815, 966524, 1547660, 1998772, 1536144)
+  GROUP BY type, code, description
+  UNION
+  SELECT 'rescue' as type, code, description, COUNT(distinct patient) patients
+  FROM medications
+  WHERE
+      -- Rescue inhalers
+      code in (630208, 859088, 745752, 351137, 351136, 245314, 2123111, 746763)
+  GROUP BY type, code, description
+)
+SELECT * FROM asthma_meds
+ORDER BY type, patients DESC
+```

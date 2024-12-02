@@ -10,8 +10,6 @@ format:
 
 ## 'elmer' = 'LLM-er' ... get it?
 #renv::install("tidyverse/elmer")
-#azure_openai_key = "f4bd3ba3bb60425f89109e6fccae941b"
-#keyring::key_set_with_value("azure_openai", "hids502_student", azure_openai_key)
 
 library(elmer)
 Sys.setenv(AZURE_OPENAI_ENDPOINT = "https://hubtest0648320451.openai.azure.com")
@@ -241,5 +239,52 @@ imaging_study <-
                imaging_studies.patient = patients.id
            where imaging_studies.id = 'd433f5a4-78ed-8329-50ab-0deea72b9976'")
 
+```
+
+## Structured Data Extraction
+
+We talked about this in class - this is a bit more challenging. Given an note, can you break it down into components and represent it as structured data? This is literally the reverse of what Synthea did. What level of accuracy do you see for the sample note above vs one from the database?
+
+See https://elmer.tidyverse.org/articles/structured-data.html?q=structured#structured-data-basics and
+https://elmer.tidyverse.org/articles/prompt-design.html?q=str#structured-data-1
+
+
+```{r}
+extractor_llm <- chat_azure(
+  deployment_id = "gpt-4o",
+  api_version = API_VERSION,
+  system_prompt = "You are an expert at extracting data from text. Given a set of instructions return the request data as JSON.",
+  # Don't stream the response back
+  echo = "none"
+)
+```
+
+```{r}
+# Here we do this without using OpenAI's support for data extraction
+
+example_text = "My name is Susan and I'm 13 years old"
+prompt = glue("Extract the name and age from the following text: \n\n {example_text}")
+response = invoke_llm(prompt, extractor_llm)
+cat(response)
+```
+
+
+```{r}
+# OpenAI always returns the JSON surrounded by the ```json ..... ``` tags. We need to strip them. 
+response = str_replace_all(response, "^```json|```$", "")
+as.data.frame(fromJSON(response))
+```
+
+```{r}
+# However we can also pass our expected data structure. In the background this the "type_object" result is converted to a "JSON schema" and sent to the LLM. This guarentees that you get back a valid data format.
+# In this case, it also gets parsed from JSON into a data structured automatically. Note that our instructions are now emebedded in the data structure as well. 
+# You can put additional instructions in the model system prompt, or pre-pend them the the text. Generally I use the system prompt.
+extractor_llm$extract_data(
+  example_text,
+  type = type_object(
+    age = type_number("The age of the patient"),
+    name = type_string("The name of the patient")
+  )
+)
 ```
 

@@ -1,0 +1,290 @@
+---
+title: "Class 12 Example"
+author: Nathan Cobb
+format: 
+  html:
+    self-contained: true
+---
+
+```{r setup, include=FALSE}
+
+## 'elmer' = 'LLM-er' ... get it?
+#renv::install("tidyverse/elmer")
+
+library(elmer)
+Sys.setenv(AZURE_OPENAI_ENDPOINT = "https://hubtest0648320451.openai.azure.com")
+Sys.setenv(AZURE_OPENAI_API_KEY = keyring::key_get(service = "azure_openai", username = "hids502_student"))
+API_VERSION = "2024-08-01-preview"
+
+
+#| warning: false
+#| output: false
+library(tidyverse)     # loads the tidyverse tools
+library(RPostgres)     # loads the database driver for PostgreSQL
+library(connections)   # helps RPostgres work with RStudio
+library(keyring)       # access to a local encrypted keychain for passwords
+library(glue)
+
+con <- connection_open(RPostgres::Postgres(),
+          dbname = "syntheticmguh",
+          host = "34.145.215.95",
+          user = "hids502_student",
+          password = key_get(service = "syntheticmguh", 
+                             username = "hids502_student"),
+          # Tell the driver to return very large integers as floating point (vs truncating them)
+          bigint = "numeric")
+
+# This is a little function that forces our notes to wrap at 80 characters
+# and then prints them to our Quarto output
+wprint = function(x) {
+  str_replace_all(x, "\n", "\n\n") %>%
+    strwrap() %>%
+    paste0(collapse = "\n") %>% 
+    cat()
+}
+
+
+```
+
+# Setup
+
+```{r}
+#| output: false
+
+base_llm <- chat_azure(
+  endpoint = "https://hubtest0648320451.openai.azure.com",
+  deployment_id = "gpt-4o",
+  api_version = API_VERSION,
+  system_prompt = "You are a friendly assistant to students studying health informatics.",
+  api_args = list(seed=12345, temperature=0)
+  )
+
+invoke_llm <- function(prompt, llm = base_llm) {
+  return(llm$chat(prompt))
+}
+
+```
+```{r}
+invoke_llm("What is an an anti-join in SQL and how do I do one?")
+```
+
+# Testing
+
+```{r}
+comic_llm <- chat_azure(
+  deployment_id = "gpt-4o",
+  api_version = API_VERSION,
+  system_prompt = "You are the assistant to a great comic. You have a deadpan sense of humor and tend to go on rambling tangents.",
+  # Don't stream the response back
+  echo = "none"
+)
+
+prompt <- "Why did the chicken cross the road?"
+response <- invoke_llm(prompt, llm = comic_llm)
+
+
+glue("Question: {prompt} 
+      Answer: {response}")
+```
+```{r}
+note_text = "
+DOB: 05/22/1946 (78 yo)
+Visit Date: 12/01/2024
+
+CC: Fatigue
+
+HPI:
+78 yo M w/ hx of CKD4 c/o fatigue, congestion, ST, and AMS. Pt reports fevers, SOB, and cough. Denies CP or trauma.
+
+PMH:
+  CKD (progression to Stage 4).
+  Severe anxiety w/ panic episodes.
+  Suspected prostate CA (workup pending).
+
+SHx:
+  Single, NS, heterosexual.
+  Limited social support; hx of environmental violence.
+
+Allergies: NKDA
+
+Vitals: T 100.8°F | HR 92 | RR 18 | BP 138/84 | SpO₂ 96% RA
+
+PE:
+  HEENT: +congestion, 2+ tonsillar swelling, erythematous OP, no exudates.
+  Resp: Mild wheeze, no rales.
+  CV: RRR, no m/r/g.
+  Abd: Soft, NT/ND, no HSM.
+  Neuro: A&O x2, mildly disoriented.
+  Ext: No edema; +tingling in b/l hands/feet.
+
+*A/P*
+
+URI (viral vs. bacterial):
+  Rapid strep, throat cx.
+  Supportive tx: APAP prn fever, PO hydration, rest.
+  AMS/fatigue, likely 2/2 systemic illness or underlying psych hx:
+  Monitor sx closely, esp confusion.
+  Labs: CBC, BMP, UA to eval for infection or metabolic derangement.
+CKD4 - med adjustment considerations:
+  Cont current meds: insulin, tacrolimus, amlodipine, alendronate.
+  Coordinate nephro f/u for CKD mgmt.
+SOB (monitor for worsening):
+  CXR prn if sx progress.
+
+RTC in 1 wk or sooner if SOB/confusion worsens.
+"
+```
+
+```{r}
+prompt <- glue("Please turn the following medical note into a Shakespearean sonnet: \n\n {note_text}")
+response = invoke_llm(prompt)
+cat(response)
+```
+# Tasks
+
+## A Single Note
+
+Take a note and turn it into a letter to the patient, ready to mail!
+
+```{r}
+encounter_note <-
+  dbGetQuery(con, "
+            select 
+            providers.name provider_full_name, providers.organization provider_organization,
+            first, last, patients.address, patients.city, patients.state, patients.zip,
+            race, patients.gender, birthdate,
+            encounters.patient, encounters.start, encounterclass, 
+              encounters.description encounter_description, note_text 
+           from patients 
+           left join encounters on 
+              patients.id = encounters.patient
+           left join providers on 
+              encounters.provider = providers.id
+           left join notes on 
+              encounters.patient = notes.patient and encounters.start::date = notes.date
+           where patients.id = '000b85ff-c01a-62c9-1515-14d3a2369a8a' 
+            AND encounters.id = '23ca2b4b-5c9e-71ff-cf4a-0515bbc9e23b'")
+
+note_text <- encounter_note$note_text[1]
+```
+
+
+## Consolidating Notes
+
+Take the last 5 notes for a patient, and have the LLM summarize everything that has happened for a clinician.
+
+```{r}
+# Get the last 5 notes for a specific patient
+notes <- 
+dbGetQuery(con, "
+            select 
+            patients.race, patients.gender, patients.birthdate,
+            encounters.patient, encounters.start, encounterclass, 
+              encounters.description encounter_description, note_text 
+           from patients 
+           left join encounters on 
+              patients.id = encounters.patient
+           left join notes on 
+              encounters.patient = notes.patient and encounters.start::date = notes.date
+           where patients.id = '000b85ff-c01a-62c9-1515-14d3a2369a8a' 
+           ORDER by encounters.start desc
+           LIMIT 5
+            ")
+```
+
+## Fixing Synthetic Data
+
+### Progress Notes
+
+The Synthea templated notes are terrible. One way to improve them would be to treat them as a data template, feed that to the LLM and ask it to rewrite it. Can you get the LLM to turn a fake note into something that looks like the note above? How about like the terrible student note that we saw in class?
+
+```{r}
+encounter_note <-
+  dbGetQuery(con, "
+            select 
+            providers.name provider_full_name, providers.organization provider_organization,
+            first, last, patients.address, patients.city, patients.state, patients.zip,
+            race, patients.gender, birthdate,
+            encounters.patient, encounters.start, encounterclass, 
+              encounters.description encounter_description, note_text 
+           from patients 
+           left join encounters on 
+              patients.id = encounters.patient
+           left join providers on 
+              encounters.provider = providers.id
+           left join notes on 
+              encounters.patient = notes.patient and encounters.start::date = notes.date
+           where patients.id = '000b85ff-c01a-62c9-1515-14d3a2369a8a' 
+            AND encounters.id = '23ca2b4b-5c9e-71ff-cf4a-0515bbc9e23b'")
+
+```
+
+
+### Imaging Reports
+
+Synthea doesn't have radiology reports - in part because there's not a lot of information to go on. Can you create a fake radiology note from the order, the encounter and the note?
+
+```{r}
+imaging_study <-
+  dbGetQuery(con, "select patients.first, patients.last,
+           imaging_studies.patient,
+           bodysite_description, modality_description,
+           imaging_studies.date as image_date, 
+           note_text
+           from imaging_studies
+           left join notes on 
+               imaging_studies.patient = notes.patient 
+               and imaging_studies.date::date = notes.date::date
+           join patients on 
+               imaging_studies.patient = patients.id
+           where imaging_studies.id = 'd433f5a4-78ed-8329-50ab-0deea72b9976'")
+
+```
+
+## Structured Data Extraction
+
+We talked about this in class - this is a bit more challenging. Given an note, can you break it down into components and represent it as structured data? This is literally the reverse of what Synthea did. What level of accuracy do you see for the sample note above vs one from the database?
+
+See https://elmer.tidyverse.org/articles/structured-data.html?q=structured#structured-data-basics and
+https://elmer.tidyverse.org/articles/prompt-design.html?q=str#structured-data-1
+
+
+```{r}
+extractor_llm <- chat_azure(
+  deployment_id = "gpt-4o",
+  api_version = API_VERSION,
+  system_prompt = "You are an expert at extracting data from text. Given a set of instructions return the request data as JSON.",
+  # Don't stream the response back
+  echo = "none"
+)
+```
+
+```{r}
+# Here we do this without using OpenAI's support for data extraction
+
+example_text = "My name is Susan and I'm 13 years old"
+prompt = glue("Extract the name and age from the following text: \n\n {example_text}")
+response = invoke_llm(prompt, extractor_llm)
+cat(response)
+```
+
+
+```{r}
+# OpenAI always returns the JSON surrounded by the ```json ..... ``` tags. We need to strip them. 
+response = str_replace_all(response, "^```json|```$", "")
+as.data.frame(fromJSON(response))
+```
+
+```{r}
+# However we can also pass our expected data structure. In the background this the "type_object" result is converted to a "JSON schema" and sent to the LLM. This guarentees that you get back a valid data format.
+# In this case, it also gets parsed from JSON into a data structured automatically. Note that our instructions are now emebedded in the data structure as well. 
+# You can put additional instructions in the model system prompt, or pre-pend them the the text. Generally I use the system prompt.
+extractor_llm$extract_data(
+  example_text,
+  type = type_object(
+    age = type_number("The age of the patient"),
+    name = type_string("The name of the patient")
+  )
+)
+```
+
